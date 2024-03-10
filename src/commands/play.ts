@@ -46,7 +46,7 @@ export default class implements Command {
   public async execute(interaction: ChatInputCommandInteraction): Promise<void> {
     const query = interaction.options.getString('query')!;
 
-    await this.addQueryToQueue.addToQueue({
+    await this.addQueryToQueue.addToQueueFromInteraction({
       interaction,
       query: query.trim(),
       addToFrontOfQueue: interaction.options.getBoolean('immediate') ?? false,

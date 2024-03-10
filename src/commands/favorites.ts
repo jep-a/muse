@@ -118,7 +118,7 @@ export default class implements Command {
       throw new Error('no favorite with that name exists');
     }
 
-    await this.addQueryToQueue.addToQueue({
+    await this.addQueryToQueue.addToQueueFromInteraction({
       interaction,
       query: favorite.query,
       shuffleAdditions: interaction.options.getBoolean('shuffle') ?? false,

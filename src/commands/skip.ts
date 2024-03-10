@@ -36,7 +36,7 @@ export default class implements Command {
     try {
       await player.forward(numToSkip);
       await interaction.reply({
-        content: 'keep \'er movin\'',
+        content: 'skipping',
         embeds: player.getCurrent() ? [buildPlayingMessageEmbed(player)] : [],
       });
     } catch (_: unknown) {

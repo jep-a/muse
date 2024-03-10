@@ -1,10 +1,12 @@
+# Fork of [codetheweb/muse](https://github.com/codetheweb/muse) with some modifications
+
 <p align="center">
   <img width="250" height="250" src="https://raw.githubusercontent.com/codetheweb/muse/master/.github/logo.png">
 </p>
 
 🚨: v1.0.0 was a breaking change. Please take a look at the [release notes](https://github.com/codetheweb/muse/releases/tag/v1.0.0) for upgrade instructions
 
-------
+---
 
 Muse is a **highly-opinionated midwestern self-hosted** Discord music bot **that doesn't suck**. It's made for small to medium-sized Discord servers/guilds (think about a group the size of you, your friends, and your friend's friends).
 
@@ -44,10 +46,10 @@ The `master` branch acts as the developing / bleeding edge branch and is not gua
 
 When running a production instance, I recommend that you use the [latest release](https://github.com/codetheweb/muse/releases/).
 
-
 ### 🐳 Docker
 
 There are a variety of image tags available:
+
 - `:2`: versions >= 2.0.0
 - `:2.1`: versions >= 2.1.0 and < 2.2.0
 - `:2.1.1`: an exact version specifier
@@ -64,7 +66,7 @@ This starts Muse and creates a data directory in your current directory.
 **Docker Compose**:
 
 ```yaml
-version: '3.4'
+version: "3.4"
 
 services:
   muse:
@@ -82,8 +84,9 @@ services:
 ### Node.js
 
 **Prerequisites**:
-* Node.js (16.x is recommended because it's the current LTS version)
-* ffmpeg (4.1 or later)
+
+- Node.js (16.x is recommended because it's the current LTS version)
+- ffmpeg (4.1 or later)
 
 1. `git clone https://github.com/codetheweb/muse.git && cd muse`
 2. Copy `.env.example` to `.env` and populate with values
@@ -104,11 +107,13 @@ By default, Muse limits the total cache size to around 2 GB. If you want to chan
 In the default state, Muse has the status "Online" and the text "Listening to Music". You can change the status through environment variables:
 
 - `BOT_STATUS`:
+
   - `online` (Online)
   - `idle` (Away)
   - `dnd` (Do not Disturb)
 
 - `BOT_ACTIVITY_TYPE`:
+
   - `PLAYING` (Playing XYZ)
   - `LISTENING` (Listening to XYZ)
   - `WATCHING` (Watching XYZ)
@@ -121,11 +126,13 @@ In the default state, Muse has the status "Online" and the text "Listening to Mu
 #### Examples
 
 **Muse is watching a movie and is DND**:
+
 - `BOT_STATUS=dnd`
 - `BOT_ACTIVITY_TYPE=WATCHING`
 - `BOT_ACTIVITY=a movie`
 
 **Muse is streaming Monstercat**:
+
 - `BOT_STATUS=online`
 - `BOT_ACTIVITY_TYPE=STREAMING`
 - `BOT_ACTIVITY_URL=https://www.twitch.tv/monstercat`

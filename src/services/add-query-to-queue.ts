@@ -1,5 +1,5 @@
 /* eslint-disable complexity */
-import {ChatInputCommandInteraction, GuildMember} from 'discord.js';
+import {ChatInputCommandInteraction, Guild, GuildMember, Message, TextBasedChannel} from 'discord.js';
 import {URL} from 'node:url';
 import {inject, injectable} from 'inversify';
 import shuffle from 'array-shuffle';
@@ -11,38 +11,209 @@ import {buildPlayingMessageEmbed} from '../utils/build-embed.js';
 import {getMemberVoiceChannel, getMostPopularVoiceChannel} from '../utils/channels.js';
 import {getGuildSettings} from '../utils/get-guild-settings.js';
 
+type QueueOptions = {
+  query: string;
+  addToFrontOfQueue: boolean;
+  shuffleAdditions: boolean;
+  shouldSplitChapters: boolean;
+};
+
 @injectable()
 export default class AddQueryToQueue {
   constructor(@inject(TYPES.Services.GetSongs) private readonly getSongs: GetSongs, @inject(TYPES.Managers.Player) private readonly playerManager: PlayerManager) {
   }
 
-  public async addToQueue({
+  public async addToQueueFromInteraction({
+    interaction,
     query,
     addToFrontOfQueue,
     shuffleAdditions,
     shouldSplitChapters,
-    interaction,
+  }: QueueOptions & {
+    interaction: ChatInputCommandInteraction;
+  }) {
+    if (!interaction.guild) {
+      throw new Error('interaction.guild is null');
+    }
+
+    if (!interaction.member) {
+      throw new Error('interaction.member is null');
+    }
+
+    if (!interaction.channel) {
+      throw new Error('interaction.channel is null');
+    }
+
+    await interaction.deferReply();
+
+    const {embeds, message: content} = await this.addToQueue({
+      guild: interaction.guild,
+      member: interaction.member as GuildMember,
+      channel: interaction.channel,
+      query,
+      addToFrontOfQueue,
+      shuffleAdditions,
+      shouldSplitChapters,
+    });
+
+    await interaction.editReply({embeds, content});
+  }
+
+  public async addToQueueFromMessage({
+    message,
+    query,
+    addToFrontOfQueue,
+    shuffleAdditions,
+    shouldSplitChapters,
+  }: QueueOptions & {
+    message: Message;
+  }) {
+    if (!message.guild) {
+      throw new Error('message.guild is null');
+    }
+
+    if (!message.member) {
+      throw new Error('message.member is null');
+    }
+
+    if (!message.channel) {
+      throw new Error('message.channel is null');
+    }
+
+    const reaction = await message.react('🧑‍💻');
+    await message.channel.sendTyping();
+    let loading = true;
+
+    const interval = setInterval(async () => {
+      if (!loading) {
+        return;
+      }
+
+      await message.channel.sendTyping();
+    }, 11000);
+
+    const {embeds, message: content} = await this.addToQueue({
+      guild: message.guild,
+      member: message.member,
+      channel: message.channel,
+      query,
+      addToFrontOfQueue,
+      shuffleAdditions,
+      shouldSplitChapters,
+    });
+
+    loading = false;
+    clearInterval(interval);
+    await message.reply({embeds, content});
+    await reaction.remove();
+  }
+
+  public async addToQueue({
+    guild,
+    member,
+    channel,
+    query,
+    addToFrontOfQueue,
+    shuffleAdditions,
+    shouldSplitChapters,
   }: {
+    guild: Guild;
+    member: GuildMember;
+    channel: TextBasedChannel;
     query: string;
     addToFrontOfQueue: boolean;
     shuffleAdditions: boolean;
     shouldSplitChapters: boolean;
-    interaction: ChatInputCommandInteraction;
-  }): Promise<void> {
-    const guildId = interaction.guild!.id;
-    const player = this.playerManager.get(guildId);
+  }) {
+    const player = this.playerManager.get(guild.id);
     const wasPlayingSong = player.getCurrent() !== null;
+    const [targetVoiceChannel] = getMemberVoiceChannel(member) ?? getMostPopularVoiceChannel(guild);
+    const settings = await getGuildSettings(guild.id);
 
-    const [targetVoiceChannel] = getMemberVoiceChannel(interaction.member as GuildMember) ?? getMostPopularVoiceChannel(interaction.guild!);
+    const {newSongs, foundMsg} = await this.getNewSongs({
+      query,
+      shuffleAdditions,
+      shouldSplitChapters,
+      playlistLimit: settings.playlistLimit,
+    });
 
-    const settings = await getGuildSettings(guildId);
+    const embeds = [];
+    let extraMsg = foundMsg;
 
-    const {playlistLimit} = settings;
+    newSongs.forEach(song => {
+      player.add({
+        ...song,
+        addedInChannelId: channel.id,
+        requestedBy: member.user.id,
+      }, {immediate: addToFrontOfQueue ?? false});
+    });
 
-    await interaction.deferReply();
+    let statusMsg = '';
 
-    let newSongs: SongMetadata[] = [];
-    let extraMsg = '';
+    if (player.voiceConnection === null) {
+      await player.connect(targetVoiceChannel);
+
+      // Resume / start playback
+      await player.play();
+
+      if (wasPlayingSong) {
+        statusMsg = 'resuming playback';
+      }
+
+      embeds.push(buildPlayingMessageEmbed(player));
+    } else if (player.status === STATUS.IDLE) {
+      // Player is idle, start playback instead
+      await player.play();
+    }
+
+    // Build response message
+    if (statusMsg !== '') {
+      if (extraMsg === '') {
+        extraMsg = statusMsg;
+      } else {
+        extraMsg = `${statusMsg}, ${extraMsg}`;
+      }
+    }
+
+    if (extraMsg !== '') {
+      extraMsg = ` (${extraMsg})`;
+    }
+
+    return {
+      embeds,
+      message: this.getMessage({newSongs, addToFrontOfQueue, extraMsg}),
+    };
+  }
+
+  private getMessage({
+    newSongs,
+    addToFrontOfQueue,
+    extraMsg,
+  }: {
+    newSongs: SongMetadata[];
+    addToFrontOfQueue: boolean;
+    extraMsg: string;
+  }) {
+    if (newSongs.length === 1) {
+      return `**${newSongs[0].title}** added to the${addToFrontOfQueue ? ' front of the' : ''} queue${extraMsg}`;
+    }
+
+    return `**${newSongs[0].title}** and ${newSongs.length - 1} other songs were added to the queue${extraMsg}`;
+  }
+
+  private async getNewSongs({
+    query,
+    shuffleAdditions,
+    shouldSplitChapters,
+    playlistLimit,
+  }: {
+    query: string;
+    shuffleAdditions: boolean;
+    shouldSplitChapters: boolean;
+    playlistLimit: number;
+  }) {
+    const newSongs: SongMetadata[] = [];
+    let foundMsg = '';
 
     // Test if it's a complete URL
     try {
@@ -74,18 +245,18 @@ export default class AddQueryToQueue {
         const [convertedSongs, nSongsNotFound, totalSongs] = await this.getSongs.spotifySource(query, playlistLimit, shouldSplitChapters);
 
         if (totalSongs > playlistLimit) {
-          extraMsg = `a random sample of ${playlistLimit} songs was taken`;
+          foundMsg = `a random sample of ${playlistLimit} songs was taken`;
         }
 
         if (totalSongs > playlistLimit && nSongsNotFound !== 0) {
-          extraMsg += ' and ';
+          foundMsg += ' and ';
         }
 
         if (nSongsNotFound !== 0) {
           if (nSongsNotFound === 1) {
-            extraMsg += '1 song was not found';
+            foundMsg += '1 song was not found';
           } else {
-            extraMsg += `${nSongsNotFound.toString()} songs were not found`;
+            foundMsg += `${nSongsNotFound.toString()} songs were not found`;
           }
         }
 
@@ -114,57 +285,9 @@ export default class AddQueryToQueue {
       throw new Error('no songs found');
     }
 
-    if (shuffleAdditions) {
-      newSongs = shuffle(newSongs);
-    }
-
-    newSongs.forEach(song => {
-      player.add({
-        ...song,
-        addedInChannelId: interaction.channel!.id,
-        requestedBy: interaction.member!.user.id,
-      }, {immediate: addToFrontOfQueue ?? false});
-    });
-
-    const firstSong = newSongs[0];
-
-    let statusMsg = '';
-
-    if (player.voiceConnection === null) {
-      await player.connect(targetVoiceChannel);
-
-      // Resume / start playback
-      await player.play();
-
-      if (wasPlayingSong) {
-        statusMsg = 'resuming playback';
-      }
-
-      await interaction.editReply({
-        embeds: [buildPlayingMessageEmbed(player)],
-      });
-    } else if (player.status === STATUS.IDLE) {
-      // Player is idle, start playback instead
-      await player.play();
-    }
-
-    // Build response message
-    if (statusMsg !== '') {
-      if (extraMsg === '') {
-        extraMsg = statusMsg;
-      } else {
-        extraMsg = `${statusMsg}, ${extraMsg}`;
-      }
-    }
-
-    if (extraMsg !== '') {
-      extraMsg = ` (${extraMsg})`;
-    }
-
-    if (newSongs.length === 1) {
-      await interaction.editReply(`u betcha, **${firstSong.title}** added to the${addToFrontOfQueue ? ' front of the' : ''} queue${extraMsg}`);
-    } else {
-      await interaction.editReply(`u betcha, **${firstSong.title}** and ${newSongs.length - 1} other songs were added to the queue${extraMsg}`);
-    }
+    return {
+      newSongs: shuffleAdditions ? shuffle(newSongs) : newSongs,
+      foundMsg,
+    };
   }
 }
